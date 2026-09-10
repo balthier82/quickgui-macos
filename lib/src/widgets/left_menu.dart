@@ -76,11 +76,9 @@ class _LeftMenuState extends State<LeftMenu> with PreferencesMixin {
                       // Minimal top padding
                       padding: const EdgeInsets.only(top: 0)
                           .add(const EdgeInsets.symmetric(horizontal: 16)),
-                      child: Container(
-                        child: Text(poweredByText,
-                            style: const TextStyle(
-                                fontSize: 12.0, fontWeight: FontWeight.bold)),
-                      ),
+                      child: Text(poweredByText,
+                          style: const TextStyle(
+                              fontSize: 12.0, fontWeight: FontWeight.bold)),
                     );
                   }
                 },

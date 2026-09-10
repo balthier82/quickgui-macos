@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tuple/tuple.dart';
 import 'package:window_size/window_size.dart';
 
@@ -18,8 +19,7 @@ import 'src/model/osicons.dart';
 import 'src/model/version.dart';
 
 Future<List<OperatingSystem>> loadOperatingSystems(bool showUbuntus) async {
-  var process = await Process.run(executablePath('quickget'), ['--list-csv'],
-      environment: gEnvironment);
+  var process = await runCommand('quickget', ['--list-csv']);
   var stdout = process.stdout as String;
   var output = <OperatingSystem>[];
 
@@ -83,9 +83,13 @@ void main() async {
     setWindowMinSize(const Size(692, 580));
     setWindowMaxSize(const Size(800, 720));
   }
-  if (findExecutable('quickget') != null) {
+  gWorkingDirectory =
+      (await SharedPreferences.getInstance()).getString(prefWorkingDirectory) ??
+          Directory.current.path;
+  gQuickgetFound = findExecutable('quickget') != null;
+  if (gQuickgetFound) {
     gOperatingSystems = loadOperatingSystems(false);
-    getIcons();
+    await getIcons();
     AppVersion.packageInfo = await PackageInfo.fromPlatform();
   }
   runApp(

@@ -1,9 +1,15 @@
 import 'dart:io';
 
+import 'package:process_run/shell.dart';
+
 var gIsSnap = Platform.environment['SNAP']?.isNotEmpty ?? false;
 const String prefWorkingDirectory = 'workingDirectory';
 const String prefThemeMode = 'themeMode';
 const String prefCurrentLocale = 'currentLocale';
+
+bool gQuickgetFound = false;
+
+String gWorkingDirectory = Directory.current.path;
 
 final List<String> _extraBinaryPaths = [
   '/opt/homebrew/bin',
@@ -34,33 +40,53 @@ final Map<String, String> gEnvironment = {
   'PATH': gBinaryPaths.join(':'),
 };
 
-final Map<String, String?> _executableCache = {};
+final Map<String, String> _executableCache = {};
+
+bool _isExecutable(String path) {
+  var stat = FileStat.statSync(path);
+  return stat.type == FileSystemEntityType.file && (stat.mode & 0x49) != 0;
+}
 
 String? findExecutable(String name) {
-  return _executableCache.putIfAbsent(name, () {
-    if (name.contains('/')) {
-      return File(name).existsSync() ? name : null;
+  var cached = _executableCache[name];
+  if (cached != null) {
+    return cached;
+  }
+  if (name.contains('/')) {
+    return _isExecutable(name) ? (_executableCache[name] = name) : null;
+  }
+  for (var dir in gBinaryPaths) {
+    var candidate = '$dir/$name';
+    if (_isExecutable(candidate)) {
+      return _executableCache[name] = candidate;
     }
-    for (var dir in gBinaryPaths) {
-      var candidate = '$dir/$name';
-      if (File(candidate).existsSync()) {
-        return candidate;
-      }
-    }
-    return null;
-  });
+  }
+  return null;
 }
 
 String executablePath(String name) => findExecutable(name) ?? name;
 
+Future<ProcessResult> runCommand(
+  String executable,
+  List<String> arguments, {
+  String? workingDirectory,
+}) {
+  var shell = Shell(
+    environment: gEnvironment,
+    workingDirectory: workingDirectory,
+  );
+  return shell.runExecutableArguments(executablePath(executable), arguments);
+}
+
 Future<String> fetchQuickemuVersion() async {
   try {
-    var result = await Process.run(executablePath('quickemu'), ['--version'],
-        environment: gEnvironment);
+    var result = await runCommand('quickemu', ['--version']);
     if (result.exitCode == 0) {
-      return result.stdout.trim();
+      return (result.stdout as String).trim();
     }
   } on ProcessException {
+    return '';
+  } on ShellException {
     return '';
   }
   return '';

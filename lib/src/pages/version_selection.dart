@@ -13,7 +13,7 @@ class VersionSelection extends StatefulWidget {
   final OperatingSystem operatingSystem;
 
   @override
-  _VersionSelectionState createState() => _VersionSelectionState();
+  State<VersionSelection> createState() => _VersionSelectionState();
 }
 
 class _VersionSelectionState extends State<VersionSelection> {
@@ -93,7 +93,7 @@ class _VersionSelectionState extends State<VersionSelection> {
                                 builder: (context) =>
                                     OptionSelection(list[index])))
                             .then((selection) {
-                          if (selection != null) {
+                          if (selection != null && context.mounted) {
                             Navigator.of(context)
                                 .pop(Tuple2<Version, Option?>(item, selection));
                           }

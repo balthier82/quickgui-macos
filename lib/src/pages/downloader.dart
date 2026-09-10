@@ -27,7 +27,7 @@ class Downloader extends StatefulWidget {
   final Option? option;
 
   @override
-  _DownloaderState createState() => _DownloaderState();
+  State<Downloader> createState() => _DownloaderState();
 }
 
 class _DownloaderState extends State<Downloader> {
@@ -61,7 +61,7 @@ class _DownloaderState extends State<Downloader> {
       options.add(widget.option!.option);
     }
     Process.start(executablePath('quickget'), options,
-            environment: gEnvironment)
+            environment: gEnvironment, workingDirectory: gWorkingDirectory)
         .then((process) {
       if (widget.option!.downloader != 'zsync') {
         process.stderr.transform(utf8.decoder).forEach(parseCurlProgress);
@@ -70,15 +70,15 @@ class _DownloaderState extends State<Downloader> {
       }
 
       process.exitCode.then((value) {
-        bool _cancelled = value.isNegative;
+        bool cancelled = value.isNegative;
         controller.close();
         setState(() {
           _downloadFinished = true;
           notificationsClient?.notify(
-            _cancelled
+            cancelled
                 ? context.t('Download cancelled')
                 : context.t('Download complete'),
-            body: _cancelled
+            body: cancelled
                 ? context.t(
                     'Download of {0} has been canceled.',
                     args: [widget.operatingSystem.name],
@@ -106,10 +106,8 @@ class _DownloaderState extends State<Downloader> {
       appBar: AppBar(
         title: Text(
           context.t('Downloading {0}', args: [
-            '${widget.operatingSystem.name} ${widget.version.version}' +
-                (widget.option!.option.isNotEmpty
-                    ? ' (${widget.option!.option})'
-                    : '')
+            '${widget.operatingSystem.name} ${widget.version.version}'
+                '${widget.option!.option.isNotEmpty ? ' (${widget.option!.option})' : ''}'
           ]),
         ),
         automaticallyImplyLeading: false,
@@ -139,7 +137,7 @@ class _DownloaderState extends State<Downloader> {
                     Padding(
                       padding: const EdgeInsets.only(top: 32),
                       child: Text(context.t('Target folder : {0}',
-                          args: [Directory.current.path])),
+                          args: [gWorkingDirectory])),
                     ),
                   ],
                 );

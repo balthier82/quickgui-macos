@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:gettext_i18n/gettext_i18n.dart';
 import 'package:path/path.dart' as path;
-import 'package:process_run/shell.dart';
 import 'package:version/version.dart';
 
 import '../globals.dart';
@@ -30,8 +29,9 @@ class _ManagerState extends State<Manager> with PreferencesMixin {
   List<String> _currentVms = [];
   Map<String, VmInfo> _activeVms = {};
   bool _spicy = false;
-  final List<String> _sshVms = [];
+  List<String> _sshVms = [];
   String? _terminalEmulator;
+  bool _refreshing = false;
   final List<String> _supportedTerminalEmulators = [
     if (Platform.isMacOS) 'osascript',
     'alacritty',
@@ -59,19 +59,10 @@ class _ManagerState extends State<Manager> with PreferencesMixin {
     super.initState();
     _getTerminalEmulator();
     _detectSpice();
-    getPreference<String>(prefWorkingDirectory).then((pref) {
-      setState(() {
-        if (pref == null) {
-          return;
-        }
-        Directory.current = pref;
-      });
-      Future.delayed(Duration.zero,
-          () => _getVms(context)); // Reload VM list when we enter the page.
-    });
+    _getVms();
     refreshTimer = Timer.periodic(const Duration(seconds: 5), (Timer t) {
-      _getVms(context);
-    }); // Reload VM list every 5 seconds.
+      _getVms();
+    });
   }
 
   @override
@@ -113,11 +104,11 @@ class _ManagerState extends State<Manager> with PreferencesMixin {
     });
   }
 
-  VmInfo _parseVmInfo(name) {
+  Future<VmInfo> _parseVmInfo(String name) async {
     VmInfo info = VmInfo();
-    File portsFile = File(name + '/' + name + '.ports');
-    if (portsFile.existsSync()) {
-      List<String> lines = portsFile.readAsLinesSync();
+    File portsFile = File(path.join(gWorkingDirectory, name, '$name.ports'));
+    if (await portsFile.exists()) {
+      List<String> lines = await portsFile.readAsLines();
       for (var line in lines) {
         List<String> parts = line.split(',');
         switch (parts[0]) {
@@ -133,8 +124,8 @@ class _ManagerState extends State<Manager> with PreferencesMixin {
     return info;
   }
 
-  bool _isValidConf(conf) {
-    List<String> lines = File(conf).readAsLinesSync();
+  Future<bool> _isValidConf(String conf) async {
+    List<String> lines = await File(conf).readAsLines();
     for (var line in lines) {
       List<String> parts = line.split('=');
       if (parts[0] == 'guest_os') {
@@ -144,47 +135,81 @@ class _ManagerState extends State<Manager> with PreferencesMixin {
     return false;
   }
 
-  void _getVms(context) async {
-    List<String> currentVms = [];
-    Map<String, VmInfo> activeVms = {};
-
-    await for (var entity
-        in Directory.current.list(recursive: false, followLinks: true)) {
-      if ((entity.path.endsWith('.conf')) && (_isValidConf(entity.path))) {
-        String name = path.basenameWithoutExtension(entity.path);
-        currentVms.add(name);
-        File pidFile = File('$name/$name.pid');
-        if (pidFile.existsSync()) {
-          String pid = pidFile.readAsStringSync().trim();
-          // Check if the process is still running using kill -0, which is
-          // a portable way to check if a process is running on macOS and Linux.
-          ProcessResult result = Process.runSync('kill', ['-0', pid]);
-          if (result.exitCode == 0) {
-            if (_activeVms.containsKey(name)) {
-              activeVms[name] = _activeVms[name]!;
-            } else {
-              activeVms[name] = _parseVmInfo(name);
-            }
-          }
-        }
-      }
+  Future<bool> _isRunning(String pid) async {
+    try {
+      var result = await Process.run(executablePath('kill'), ['-0', pid]);
+      return result.exitCode == 0;
+    } on ProcessException {
+      return false;
     }
-    currentVms.sort();
-    setState(() {
-      _currentVms = currentVms;
-      _activeVms = activeVms;
-    });
   }
 
-  Future<bool> _detectSsh(int port) async {
-    bool isSSH = false;
+  Future<void> _getVms() async {
+    if (_refreshing) {
+      return;
+    }
+    _refreshing = true;
     try {
-      Socket socket = await Socket.connect('localhost', port);
-      isSSH = await socket.any((event) => utf8.decode(event).contains('SSH'));
-      socket.close();
-      return isSSH;
+      List<String> currentVms = [];
+      Map<String, VmInfo> activeVms = {};
+
+      await for (var entity in Directory(gWorkingDirectory)
+          .list(recursive: false, followLinks: true)) {
+        if (!entity.path.endsWith('.conf') || !await _isValidConf(entity.path)) {
+          continue;
+        }
+        String name = path.basenameWithoutExtension(entity.path);
+        currentVms.add(name);
+        File pidFile = File(path.join(gWorkingDirectory, name, '$name.pid'));
+        if (!await pidFile.exists()) {
+          continue;
+        }
+        String pid = (await pidFile.readAsString()).trim();
+        if (await _isRunning(pid)) {
+          activeVms[name] =
+              _activeVms[name] ?? await _parseVmInfo(name);
+        }
+      }
+      currentVms.sort();
+
+      var sshVms = <String>[];
+      await Future.wait(activeVms.entries
+          .where((entry) => entry.value.sshPort != null)
+          .map((entry) async {
+        if (await _detectSsh(int.parse(entry.value.sshPort!))) {
+          sshVms.add(entry.key);
+        }
+      }));
+      sshVms.sort();
+
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _currentVms = currentVms;
+        _activeVms = activeVms;
+        _sshVms = sshVms;
+      });
+    } finally {
+      _refreshing = false;
+    }
+  }
+
+  String _escapeAppleScript(String value) =>
+      value.replaceAll(r'\', r'\\').replaceAll('"', r'\"');
+
+  Future<bool> _detectSsh(int port) async {
+    const timeout = Duration(seconds: 2);
+    Socket? socket;
+    try {
+      socket = await Socket.connect('localhost', port, timeout: timeout);
+      return await socket
+          .any((event) => utf8.decode(event).contains('SSH'))
+          .timeout(timeout);
     } catch (exception) {
       return false;
+    } finally {
+      socket?.destroy();
     }
   }
 
@@ -217,13 +242,13 @@ class _ManagerState extends State<Manager> with PreferencesMixin {
                       .getDirectoryPath(dialogTitle: "Pick a folder");
                   if (folder != null) {
                     setState(() {
-                      Directory.current = folder;
+                      gWorkingDirectory = folder;
                     });
-                    savePreference(
-                        prefWorkingDirectory, Directory.current.path);
+                    savePreference(prefWorkingDirectory, folder);
+                    _getVms();
                   }
                 },
-                child: Text(Directory.current.path),
+                child: Text(gWorkingDirectory),
               ),
             ],
           ),
@@ -258,17 +283,6 @@ class _ManagerState extends State<Manager> with PreferencesMixin {
       }
       if (vmInfo.sshPort != null && _terminalEmulator != null) {
         connectInfo += '${context.t('SSH port')}: ${vmInfo.sshPort!} ';
-        _detectSsh(int.parse(vmInfo.sshPort!)).then((sshRunning) {
-          if (sshRunning && !sshy) {
-            setState(() {
-              _sshVms.add(currentVm);
-            });
-          } else if (!sshRunning && sshy) {
-            setState(() {
-              _sshVms.remove(currentVm);
-            });
-          }
-        });
       }
     }
     String vmStem = currentVm;
@@ -300,21 +314,21 @@ class _ManagerState extends State<Manager> with PreferencesMixin {
                   onPressed: active
                       ? null
                       : () async {
-                          Map<String, VmInfo> activeVms = _activeVms;
-                          List<String> command = [
-                            executablePath('quickemu'),
+                          List<String> arguments = [
                             '--vm',
                             '$currentVm.conf'
                           ];
                           if (_spicy) {
-                            command.addAll(['--display', 'spice']);
+                            arguments.addAll(['--display', 'spice']);
                           }
-                          var shell = Shell(environment: gEnvironment);
-                          await shell.run(command.join(' '));
-                          VmInfo info = _parseVmInfo(currentVm);
-                          activeVms[currentVm] = info;
+                          await runCommand('quickemu', arguments,
+                              workingDirectory: gWorkingDirectory);
+                          VmInfo info = await _parseVmInfo(currentVm);
+                          if (!mounted) {
+                            return;
+                          }
                           setState(() {
-                            _activeVms = activeVms;
+                            _activeVms = {..._activeVms, currentVm: info};
                           });
                         }),
               IconButton(
@@ -347,21 +361,19 @@ class _ManagerState extends State<Manager> with PreferencesMixin {
                         ).then((result) async {
                           result = result ?? false;
                           if (result) {
-                            var shell = Shell(environment: gEnvironment);
                             // If Quickemu is newer than 4.9.6, use the new --kill option
                             // which is macOS compatible.
                             var quickemuVersion =
                                 Version.parse(await fetchQuickemuVersion());
                             if (quickemuVersion >= Version(4, 9, 6)) {
-                              shell.run([
-                                executablePath('quickemu'),
-                                '--vm',
-                                '$currentVm.conf',
-                                '--kill'
-                              ].join(' '));
+                              await runCommand(
+                                  'quickemu', ['--vm', '$currentVm.conf', '--kill'],
+                                  workingDirectory: gWorkingDirectory);
                             } else {
-                              shell.run([executablePath('killall'), currentVm]
-                                  .join(' '));
+                              await runCommand('killall', [currentVm]);
+                            }
+                            if (!mounted) {
+                              return;
                             }
                             setState(() {
                               _activeVms.remove(currentVm);
@@ -406,14 +418,10 @@ class _ManagerState extends State<Manager> with PreferencesMixin {
                         ).then((result) async {
                           result = result ?? 'cancel';
                           if (result != 'cancel') {
-                            List<String> command = [
-                              executablePath('quickemu'),
-                              '--vm',
-                              '$currentVm.conf',
-                              '--delete-$result'
-                            ];
-                            var shell = Shell(environment: gEnvironment);
-                            await shell.run(command.join(' '));
+                            await runCommand('quickemu',
+                                ['--vm', '$currentVm.conf', '--delete-$result'],
+                                workingDirectory: gWorkingDirectory);
+                            await _getVms();
                           }
                         });
                       },
@@ -436,12 +444,7 @@ class _ManagerState extends State<Manager> with PreferencesMixin {
                 onPressed: !_spicy
                     ? null
                     : () {
-                        var shell = Shell(environment: gEnvironment);
-                        shell.run([
-                          executablePath('spicy'),
-                          '-p',
-                          vmInfo.spicePort!
-                        ].join(' '));
+                        runCommand('spicy', ['-p', vmInfo.spicePort!]);
                       },
               ),
               IconButton(
@@ -500,7 +503,9 @@ class _ManagerState extends State<Manager> with PreferencesMixin {
                                 .basenameWithoutExtension(_terminalEmulator!)) {
                               case 'osascript':
                                 sshArgs = [
-                                  '-e \'tell app "Terminal" to do script "${sshArgs.join(' ')}"\''
+                                  '-e',
+                                  'tell app "Terminal" to do script '
+                                      '"${_escapeAppleScript(sshArgs.join(' '))}"'
                                 ];
                                 break;
                               case 'gnome-terminal':
@@ -530,10 +535,8 @@ class _ManagerState extends State<Manager> with PreferencesMixin {
                                 sshArgs = ['-e', command];
                                 break;
                             }
-                            sshArgs.insert(
-                                0, executablePath(_terminalEmulator!));
-                            var shell = Shell(environment: gEnvironment);
-                            shell.run(sshArgs.join(' '));
+                            runCommand(_terminalEmulator!, sshArgs,
+                                workingDirectory: gWorkingDirectory);
                           }
                         });
                       },

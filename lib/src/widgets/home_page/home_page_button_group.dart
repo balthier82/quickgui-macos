@@ -89,9 +89,8 @@ class _HomePageButtonGroupState extends State<HomePageButtonGroup>
           onPressed: (_selectedVersion == null)
               ? null
               : () async {
-                  final workingDirectory =
-                      await getPreference<String>(prefWorkingDirectory);
-                  final tmpFile = File("$workingDirectory/modecheck.tmp");
+                  final tmpFile =
+                      File("$gWorkingDirectory/modecheck.tmp");
                   if (tmpFile.existsSync()) {
                     tmpFile.deleteSync();
                   }
@@ -103,6 +102,9 @@ class _HomePageButtonGroupState extends State<HomePageButtonGroup>
                   if (tmpFile.existsSync()) {
                     tmpFile.deleteSync();
 
+                    if (!context.mounted) {
+                      return;
+                    }
                     Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (context) => Downloader(
@@ -113,6 +115,9 @@ class _HomePageButtonGroupState extends State<HomePageButtonGroup>
                       ),
                     );
                   } else {
+                    if (!context.mounted) {
+                      return;
+                    }
                     showDialog(
                       context: context,
                       builder: (context) => AlertDialog(
