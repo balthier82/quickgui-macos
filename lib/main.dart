@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -60,11 +59,11 @@ Future<List<OperatingSystem>> loadOperatingSystems(bool showUbuntus) async {
 }
 
 Future<void> getIcons() async {
-  final manifestContent = await rootBundle.loadString('AssetManifest.json');
-  final Map<String, dynamic> manifestMap = json.decode(manifestContent);
-  final imagePaths = manifestMap.keys
+  final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+  final imagePaths = manifest
+      .listAssets()
       .where((String key) => key.contains('quickemu-icons/'))
-      .where((String key) => key.contains('.svg'))
+      .where((String key) => key.endsWith('.svg'))
       .toList();
   for (final imagePath in imagePaths) {
     String filename = imagePath.split('/').last;
