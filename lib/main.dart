@@ -9,6 +9,7 @@ import 'package:tuple/tuple.dart';
 import 'package:window_size/window_size.dart';
 
 import 'src/app.dart';
+import 'src/globals.dart';
 import 'src/mixins/app_version.dart';
 import 'src/model/app_settings.dart';
 import 'src/model/operating_system.dart';
@@ -17,7 +18,8 @@ import 'src/model/osicons.dart';
 import 'src/model/version.dart';
 
 Future<List<OperatingSystem>> loadOperatingSystems(bool showUbuntus) async {
-  var process = await Process.run('quickget', ['--list-csv']);
+  var process = await Process.run(executablePath('quickget'), ['--list-csv'],
+      environment: gEnvironment);
   var stdout = process.stdout as String;
   var output = <OperatingSystem>[];
 
@@ -81,8 +83,7 @@ void main() async {
     setWindowMinSize(const Size(692, 580));
     setWindowMaxSize(const Size(800, 720));
   }
-  final foundQuickGet = await Process.run('which', ['quickget']);
-  if (foundQuickGet.exitCode == 0) {
+  if (findExecutable('quickget') != null) {
     gOperatingSystems = loadOperatingSystems(false);
     getIcons();
     AppVersion.packageInfo = await PackageInfo.fromPlatform();

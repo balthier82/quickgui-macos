@@ -82,7 +82,7 @@ class _ManagerState extends State<Manager> with PreferencesMixin {
 
   void _getTerminalEmulator() async {
     // Find out which terminal emulator we have set as the default.
-    String result = whichSync('x-terminal-emulator') ?? '';
+    String result = findExecutable('x-terminal-emulator') ?? '';
     if (result.isNotEmpty) {
       String terminalEmulator = await File(result).resolveSymbolicLinks();
       terminalEmulator = path.basenameWithoutExtension(terminalEmulator);
@@ -95,7 +95,7 @@ class _ManagerState extends State<Manager> with PreferencesMixin {
       // If x-terminal-emulator doesn't exist or returns empty, look for
       // supported terminals in the PATH
       for (String terminal in _supportedTerminalEmulators) {
-        String? terminalPath = whichSync(terminal);
+        String? terminalPath = findExecutable(terminal);
         if (terminalPath != null) {
           setState(() {
             _terminalEmulator = terminal;
@@ -107,7 +107,7 @@ class _ManagerState extends State<Manager> with PreferencesMixin {
   }
 
   void _detectSpice() async {
-    var result = whichSync('spicy') ?? '';
+    var result = findExecutable('spicy') ?? '';
     setState(() {
       _spicy = result.isNotEmpty;
     });
@@ -302,14 +302,14 @@ class _ManagerState extends State<Manager> with PreferencesMixin {
                       : () async {
                           Map<String, VmInfo> activeVms = _activeVms;
                           List<String> command = [
-                            'quickemu',
+                            executablePath('quickemu'),
                             '--vm',
                             '$currentVm.conf'
                           ];
                           if (_spicy) {
                             command.addAll(['--display', 'spice']);
                           }
-                          var shell = Shell();
+                          var shell = Shell(environment: gEnvironment);
                           await shell.run(command.join(' '));
                           VmInfo info = _parseVmInfo(currentVm);
                           activeVms[currentVm] = info;
@@ -347,20 +347,21 @@ class _ManagerState extends State<Manager> with PreferencesMixin {
                         ).then((result) async {
                           result = result ?? false;
                           if (result) {
-                            var shell = Shell();
+                            var shell = Shell(environment: gEnvironment);
                             // If Quickemu is newer than 4.9.6, use the new --kill option
                             // which is macOS compatible.
                             var quickemuVersion =
                                 Version.parse(await fetchQuickemuVersion());
                             if (quickemuVersion >= Version(4, 9, 6)) {
                               shell.run([
-                                'quickemu',
+                                executablePath('quickemu'),
                                 '--vm',
                                 '$currentVm.conf',
                                 '--kill'
                               ].join(' '));
                             } else {
-                              shell.run(['killall', currentVm].join(' '));
+                              shell.run([executablePath('killall'), currentVm]
+                                  .join(' '));
                             }
                             setState(() {
                               _activeVms.remove(currentVm);
@@ -406,12 +407,12 @@ class _ManagerState extends State<Manager> with PreferencesMixin {
                           result = result ?? 'cancel';
                           if (result != 'cancel') {
                             List<String> command = [
-                              'quickemu',
+                              executablePath('quickemu'),
                               '--vm',
                               '$currentVm.conf',
                               '--delete-$result'
                             ];
-                            var shell = Shell();
+                            var shell = Shell(environment: gEnvironment);
                             await shell.run(command.join(' '));
                           }
                         });
@@ -435,8 +436,12 @@ class _ManagerState extends State<Manager> with PreferencesMixin {
                 onPressed: !_spicy
                     ? null
                     : () {
-                        var shell = Shell();
-                        shell.run(['spicy', '-p', vmInfo.spicePort!].join(' '));
+                        var shell = Shell(environment: gEnvironment);
+                        shell.run([
+                          executablePath('spicy'),
+                          '-p',
+                          vmInfo.spicePort!
+                        ].join(' '));
                       },
               ),
               IconButton(
@@ -525,8 +530,9 @@ class _ManagerState extends State<Manager> with PreferencesMixin {
                                 sshArgs = ['-e', command];
                                 break;
                             }
-                            sshArgs.insert(0, _terminalEmulator!);
-                            var shell = Shell();
+                            sshArgs.insert(
+                                0, executablePath(_terminalEmulator!));
+                            var shell = Shell(environment: gEnvironment);
                             shell.run(sshArgs.join(' '));
                           }
                         });

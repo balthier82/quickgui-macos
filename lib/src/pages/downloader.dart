@@ -6,6 +6,7 @@ import 'package:desktop_notifications/desktop_notifications.dart';
 import 'package:flutter/material.dart';
 import 'package:gettext_i18n/gettext_i18n.dart';
 
+import '../globals.dart';
 import '../model/operating_system.dart';
 import '../model/option.dart';
 import '../model/version.dart';
@@ -59,7 +60,9 @@ class _DownloaderState extends State<Downloader> {
     if (widget.option != null) {
       options.add(widget.option!.option);
     }
-    Process.start('quickget', options).then((process) {
+    Process.start(executablePath('quickget'), options,
+            environment: gEnvironment)
+        .then((process) {
       if (widget.option!.downloader != 'zsync') {
         process.stderr.transform(utf8.decoder).forEach(parseCurlProgress);
       } else {
@@ -117,10 +120,10 @@ class _DownloaderState extends State<Downloader> {
             child: StreamBuilder(
               stream: _progressStream,
               builder: (context, AsyncSnapshot<double> snapshot) {
-                var data = !snapshot.hasData ||
-                        widget.option!.downloader != 'curl'
-                    ? null
-                    : snapshot.data;
+                var data =
+                    !snapshot.hasData || widget.option!.downloader != 'curl'
+                        ? null
+                        : snapshot.data;
                 return Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
